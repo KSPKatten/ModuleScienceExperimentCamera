@@ -77,9 +77,14 @@ public class ModuleScienceExperimentCamera : ModuleScienceExperiment
     private DialogGUILabel dialogStatus;
     private Camera camera;
 
+    bool isPanorama;
+
     [KSPEvent(name = "SnapPhoto", guiName = "Take a photo", active = true, guiActive = true, requireFullControl = false)]
     public void SnapPhoto()
     {
+        if (debug)
+            printf("SnapPhoto");
+
         if (!displayActive)
         {
             displayActive = true;
@@ -107,17 +112,21 @@ public class ModuleScienceExperimentCamera : ModuleScienceExperiment
         }
 
         MultiOptionDialog multiOptionDialog =
-            new MultiOptionDialog("Popup", "This is gonna look great!", "View photo", HighLogic.UISkin,
-            size.x + 20,
-            new DialogGUIBase[]
-            {
-                new DialogGUIImage( size,
-                    new Vector2(0.0f, 0.0f), Color.white, composite),
-                dialogStatus = new DialogGUILabel("Not enough data"),
-                new DialogGUIButton("Prepare transmission", delegate { TransmitData(); }, false),
-                new DialogGUIButton("Close", delegate { dialog.Dismiss(); }, true)
-                // new DialogGUIFlexibleSpace(),
-            });
+            new MultiOptionDialog(
+                "Popup",
+                "This is gonna look great!",
+                isPanorama ? "View panorama" : "View photo",
+                HighLogic.UISkin,
+                size.x + 20,
+                new DialogGUIBase[]
+                {
+                    new DialogGUIImage( size,
+                        new Vector2(0.0f, 0.0f), Color.white, composite),
+                    dialogStatus = new DialogGUILabel("Not enough data"),
+                    new DialogGUIButton("Prepare transmission", delegate { TransmitData(); }, false),
+                    new DialogGUIButton("Close", delegate { dialog.Dismiss(); }, true)
+                    // new DialogGUIFlexibleSpace(),
+                });
         dialog = PopupDialog.SpawnPopupDialog(multiOptionDialog,
             false,
             HighLogic.UISkin,
@@ -162,7 +171,7 @@ public class ModuleScienceExperimentCamera : ModuleScienceExperiment
             if (angle.y > panoramaAngle.y / 2)
                 angle.y = panoramaAngle.y / 2;
             */
-            int left = (int)((angle.x + panoramaAngle.x / 2 ) * composite.width / panoramaAngle.x - texture.width / 2);
+            int left = (int)((angle.x + panoramaAngle.x / 2) * composite.width / panoramaAngle.x - texture.width / 2);
             if (left < 0)
                 left += composite.width;
 
@@ -245,10 +254,10 @@ public class ModuleScienceExperimentCamera : ModuleScienceExperiment
         Vector3 forwardProjected = Vector3.ProjectOnPlane(Vector3.forward, up).normalized;
         Vector2 angles;
 
-        if (reference == Vector3.zero || photoSize==panoramaSize)
+        if (reference == Vector3.zero || photoSize == panoramaSize)
         {
             reference = part.transform.rotation * forwardProjected;
-            if(debug)
+            if (debug)
                 printf("Recording new reference");
         }
 
@@ -321,7 +330,10 @@ public class ModuleScienceExperimentCamera : ModuleScienceExperiment
 
     private void FixedUpdate()
     {
-        if(camera != null )
+        if (debug)
+            printf("FixedUpdate");
+
+        if (camera != null)
             camera.fieldOfView = fieldOfView;
 
         // Optionally create debug vectors
@@ -333,31 +345,10 @@ public class ModuleScienceExperimentCamera : ModuleScienceExperiment
 
     Texture2D texture;
 
-    private void OnPostRender()
-    {
-        if (!snap)
-            return;
-
-        snap = false;
-
-        if(texture == null)
-            texture = new Texture2D(renderTexture.width, renderTexture.height, TextureFormat.RGB24, false);
-        texture.ReadPixels(new Rect(0, 0, renderTexture.width, renderTexture.height), 0, 0);
-        texture.Apply();
-
-        photo.Snap(CalculateAngles(), texture, debug);
-        progress = photo.Progress();
-
-        if (photo.Progress() < 100)
-            return;
-
-        SetStatus("Data acquired!");
-    }
-
     private void SetStatus(string status)
     {
         this.status = status;
-        if(dialogStatus != null)
+        if (dialogStatus != null)
             dialogStatus.SetOptionText(status);
     }
 
@@ -390,7 +381,9 @@ public class ModuleScienceExperimentCamera : ModuleScienceExperiment
             panoramaSize,
             panoramaAngles);
 
-        if (photoSize != panoramaSize)
+        isPanorama = photoSize != panoramaSize;
+
+        if (isPanorama)
             Events["ViewPhoto"].guiName = "View panorama";
         else
             Events["ViewPhoto"].guiName = "View photo";
@@ -399,10 +392,15 @@ public class ModuleScienceExperimentCamera : ModuleScienceExperiment
         // Precalculate a good starting point for the fov
         if (fieldOfView == -1)
         {
-            if (photoSize.x > photoSize.y)
-                fieldOfView = 360.0f * photoSize.x / panoramaSize.x;
+            if (isPanorama)
+            {
+                if (panoramaSize.x > panoramaSize.y)
+                    fieldOfView = 360.0f * photoSize.x / panoramaSize.x;
+                else
+                    fieldOfView = 360.0f * photoSize.y / panoramaSize.y;
+            }
             else
-                fieldOfView = 360.0f * photoSize.y / panoramaSize.y;
+                fieldOfView = 100;
         }
 
         SetupRenderTexture();
@@ -431,6 +429,33 @@ public class ModuleScienceExperimentCamera : ModuleScienceExperiment
         }
     }
 
+    public void CameraOnPostRender(Camera cam)
+    {
+        if (debug)
+            printf("CameraOnPostRender &s", cam);
+
+        if (cam != camera)
+            return;
+
+        if (!snap)
+            return;
+
+        snap = false;
+
+        if (texture == null)
+            texture = new Texture2D(renderTexture.width, renderTexture.height, TextureFormat.RGB24, false);
+        texture.ReadPixels(new Rect(0, 0, renderTexture.width, renderTexture.height), 0, 0);
+        texture.Apply();
+
+        photo.Snap(CalculateAngles(), texture, debug);
+        progress = photo.Progress();
+
+        if (photo.Progress() < 100)
+            return;
+
+        SetStatus("Data acquired!");
+    }
+
     private void SetupRenderTexture()
     {
         renderTexture = new RenderTexture((int)photoSize.x, (int)photoSize.y, 1);
@@ -449,9 +474,19 @@ public class ModuleScienceExperimentCamera : ModuleScienceExperiment
             return;
         }
 
-        camera = part.gameObject.GetComponent<Camera>();
-        if(camera == null)
-            camera = part.gameObject.AddComponent<Camera>();
+        GameObject cameraObject = new GameObject("cameraObject");
+
+        if (cameraObject == null)
+        {
+            printf("Failed to create cameraObject");
+            return;
+        }
+
+        cameraObject.transform.parent = part.transform;
+
+        camera = cameraObject.AddComponent<Camera>();
+        camera.name = "ModuleScienceExperimentCamera";
+        Camera.onPostRender += CameraOnPostRender;
 
         if (camera == null)
         {
